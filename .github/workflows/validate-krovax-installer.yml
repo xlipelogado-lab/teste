@@ -1,0 +1,55 @@
+name: Validate KrovaX Installer
+
+on:
+  push:
+    branches: [krovax-installer-validation]
+    paths:
+      - 'tests/krovax/**'
+      - '.github/workflows/validate-krovax-installer.yml'
+  workflow_dispatch:
+
+jobs:
+  parse-windows-powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct sanitized scripts
+        shell: powershell
+        run: |
+          $b64 = (Get-Content tests\krovax\chunk1.txt -Raw) +
+                 (Get-Content tests\krovax\chunk2.txt -Raw) +
+                 (Get-Content tests\krovax\chunk3.txt -Raw) +
+                 (Get-Content tests\krovax\chunk4.txt -Raw)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\krovax.tar.gz",[Convert]::FromBase64String($b64))
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\krovax" -Force | Out-Null
+          tar -xzf "$env:RUNNER_TEMP\krovax.tar.gz" -C "$env:RUNNER_TEMP\krovax"
+      - name: Parse every script with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
+          $allErrors = @()
+          Get-ChildItem "$env:RUNNER_TEMP\krovax\*.ps1" | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0) {
+              Write-Host "PARSE FAIL: $($_.Name)" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host $_.Message }
+              $allErrors += $errors
+            } else {
+              Write-Host "PARSE OK: $($_.Name)" -ForegroundColor Green
+            }
+          }
+          if($allErrors.Count -gt 0){ exit 1 }
+      - name: Test DataTable return fix
+        shell: powershell
+        run: |
+          function Test-Table {
+            $dt = New-Object System.Data.DataTable
+            [void]$dt.Columns.Add('DbId',[int])
+            $r=$dt.NewRow(); $r.DbId=123; $dt.Rows.Add($r)
+            return ,$dt
+          }
+          $x=Test-Table
+          if($x.Rows[0].DbId -ne 123){ throw 'DataTable .Rows regression' }
+          Write-Host 'DataTable .Rows fix OK' -ForegroundColor Green
