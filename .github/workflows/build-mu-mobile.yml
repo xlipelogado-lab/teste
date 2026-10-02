@@ -77,22 +77,7 @@ jobs:
           $loadText = $loadText.Replace($extractNeedle, $extractReplacement)
 
           $checkPattern = 'return Directory\.EnumerateFileSystemEntries\(dataPath\)\s*\.Any\(e => !e\.EndsWith\("Data\.zip", StringComparison\.OrdinalIgnoreCase\)\);'
-          $checkReplacement = @'
-string marker = Path.Combine(dataPath, ".data-ready-v1");
-                if (File.Exists(marker))
-                    return true;
-
-                bool hasAssets = Directory.EnumerateFileSystemEntries(dataPath)
-                    .Any(e => !e.EndsWith("Data.zip", StringComparison.OrdinalIgnoreCase));
-
-                if (hasAssets)
-                {
-                    File.WriteAllText(marker, "migrated");
-                    return true;
-                }
-
-                return false;
-'@
+          $checkReplacement = "string marker = Path.Combine(dataPath, `".data-ready-v1`");`r`n                if (File.Exists(marker))`r`n                    return true;`r`n`r`n                bool hasAssets = Directory.EnumerateFileSystemEntries(dataPath)`r`n                    .Any(e => !e.EndsWith(`"Data.zip`", StringComparison.OrdinalIgnoreCase));`r`n`r`n                if (hasAssets)`r`n                {`r`n                    File.WriteAllText(marker, `"migrated`");`r`n                    return true;`r`n                }`r`n`r`n                return false;"
           $loadText = [regex]::Replace($loadText, $checkPattern, $checkReplacement)
           Set-Content $loadPath $loadText -Encoding UTF8
 
