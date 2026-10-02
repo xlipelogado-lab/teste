@@ -38,17 +38,15 @@ jobs:
           $cfg.MuOnlineSettings.Graphics.IsFullScreen = $true
           $cfg | ConvertTo-Json -Depth 100 | Set-Content $path -Encoding UTF8
 
-          Write-Host "Configured server:"
-          Get-Content $path | Select-String "ConnectServerHost|ConnectServerPort|ClientVersion|ClientSerial"
-
-      - name: Brand Android app
+      - name: Optimize Android startup and persistent data
         shell: pwsh
         working-directory: muclient
         run: |
           $proj = "MuAndroid/MuAndroid.csproj"
           $text = Get-Content $proj -Raw
           $text = $text -replace "<ApplicationId>.*?</ApplicationId>", "<ApplicationId>com.openmu.mumobile</ApplicationId>"
-          $text = $text -replace "<ApplicationDisplayVersion>.*?</ApplicationDisplayVersion>", "<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>"
+          $text = $text -replace "<ApplicationVersion>.*?</ApplicationVersion>", "<ApplicationVersion>2</ApplicationVersion>"
+          $text = $text -replace "<ApplicationDisplayVersion>.*?</ApplicationDisplayVersion>", "<ApplicationDisplayVersion>1.1</ApplicationDisplayVersion>"
           Set-Content $proj $text -Encoding UTF8
 
           $strings = Get-ChildItem "MuAndroid" -Recurse -Filter "Strings.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -57,6 +55,48 @@ jobs:
             $s = $s -replace '(?s)<string name="app_name">.*?</string>', '<string name="app_name">MU Online Mobile</string>'
             Set-Content $strings.FullName $s -Encoding UTF8
           }
+
+          $mainPath = "MuAndroid/MainActivity.cs"
+          $mainText = Get-Content $mainPath -Raw
+          $needle = 'Constants.SETTINGS_PATH = EnsureAndroidConfig();'
+          if (-not $mainText.Contains($needle)) { throw "Nao encontrei ponto para configurar DataPath." }
+          $replacement = "Constants.SETTINGS_PATH = EnsureAndroidConfig();`r`n            Constants.DataPath = Path.Combine(Application.Context.FilesDir!.AbsolutePath, `"Data`");"
+          $mainText = $mainText.Replace($needle, $replacement)
+          Set-Content $mainPath $mainText -Encoding UTF8
+
+          $loadPath = "Client.Main/Scenes/LoadScene.cs"
+          $loadText = Get-Content $loadPath -Raw
+
+          $pattern = 'if \(OperatingSystem\.IsAndroid\(\)\)\s*nextSceneType = typeof\(ServerConfigScene\);\s*else\s*nextSceneType = Constants\.ENTRY_SCENE == typeof\(LoadScene\)\s*\? typeof\(LoginScene\)\s*:\s*Constants\.ENTRY_SCENE;'
+          $replacementScene = 'nextSceneType = Constants.ENTRY_SCENE == typeof(LoadScene) ? typeof(LoginScene) : Constants.ENTRY_SCENE;'
+          $loadText = [regex]::Replace($loadText, $pattern, $replacementScene)
+
+          $extractNeedle = 'await ExtractZipWithProgressAsync(localZip, extractPath, ct);'
+          $extractReplacement = "await ExtractZipWithProgressAsync(localZip, extractPath, ct);`r`n            File.WriteAllText(Path.Combine(extractPath, `".data-ready-v1`"), `"ok`");"
+          if (-not $loadText.Contains($extractNeedle)) { throw "Nao encontrei etapa de extracao." }
+          $loadText = $loadText.Replace($extractNeedle, $extractReplacement)
+
+          $checkPattern = 'return Directory\.EnumerateFileSystemEntries\(dataPath\)\s*\.Any\(e => !e\.EndsWith\("Data\.zip", StringComparison\.OrdinalIgnoreCase\)\);'
+          $checkReplacement = @'
+string marker = Path.Combine(dataPath, ".data-ready-v1");
+                if (File.Exists(marker))
+                    return true;
+
+                bool hasAssets = Directory.EnumerateFileSystemEntries(dataPath)
+                    .Any(e => !e.EndsWith("Data.zip", StringComparison.OrdinalIgnoreCase));
+
+                if (hasAssets)
+                {
+                    File.WriteAllText(marker, "migrated");
+                    return true;
+                }
+
+                return false;
+'@
+          $loadText = [regex]::Replace($loadText, $checkPattern, $checkReplacement)
+          Set-Content $loadPath $loadText -Encoding UTF8
+
+          Write-Host "Android otimizado: Data persistente e login direto."
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -117,15 +157,13 @@ jobs:
           }
 
           New-Item "../artifact" -ItemType Directory -Force | Out-Null
-          Copy-Item $apks[0].FullName "../artifact/MU-Online-Mobile-OpenMU.apk" -Force
-
-          Write-Host "APK selecionado:"
-          Get-Item "../artifact/MU-Online-Mobile-OpenMU.apk" | Format-List FullName,Length
+          Copy-Item $apks[0].FullName "../artifact/MU-Online-Mobile-OpenMU-v2.apk" -Force
+          Get-Item "../artifact/MU-Online-Mobile-OpenMU-v2.apk" | Format-List FullName,Length
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MU-Online-Mobile-OpenMU
-          path: artifact/MU-Online-Mobile-OpenMU.apk
+          name: MU-Online-Mobile-OpenMU-v2
+          path: artifact/MU-Online-Mobile-OpenMU-v2.apk
           if-no-files-found: error
           retention-days: 30
