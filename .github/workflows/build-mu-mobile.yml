@@ -54,7 +54,7 @@ jobs:
           $strings = Get-ChildItem "MuAndroid" -Recurse -Filter "Strings.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($strings) {
             $s = Get-Content $strings.FullName -Raw
-            $s = $s -replace "(?s)<string name=\"app_name\">.*?</string>", "<string name=\"app_name\">MU Online Mobile</string>"
+            $s = $s -replace '(?s)<string name="app_name">.*?</string>', '<string name="app_name">MU Online Mobile</string>'
             Set-Content $strings.FullName $s -Encoding UTF8
           }
 
